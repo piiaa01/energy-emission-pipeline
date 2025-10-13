@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+.env
+.env.*
+*.env
+dist/
+build/
+*.egg-info/
+
+# Data & logs
+data/logs/*.csv
+data/tmp/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Streamlit
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
