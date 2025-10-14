@@ -1,187 +1,162 @@
-# 🌍 Pipeline for Energy and Emission Monitoring During AI Model Training
+# Pipeline for Energy and Emission Monitoring During AI Model Training
 
-## 🧭 1. Problem Definition
-### Selected Problem
-Modern AI models consume substantial amounts of computational power and energy, leading to high CO₂ emissions. However, there is a lack of continuous and scalable monitoring systems that track energy usage and environmental impact during model training.
+## Overview
+This project aims to build a Big Data pipeline that monitors energy consumption and CO₂ emissions during AI model training. 
+Instead of using external tools such as CodeCarbon, we design a custom, distributed monitoring system that collects, processes, 
+and stores relevant hardware and runtime metrics in real-time.
 
-### Suitability for Big Data
-- Continuous monitoring of hardware metrics (GPU, CPU, IO, network, etc.) produces **high-frequency time-series data**.  
-- Each training run can generate **thousands of data points per second** across distributed nodes.  
-- Real-time ingestion, aggregation, and visualization of these metrics require **streaming data pipelines** and **scalable storage systems**.  
+The project aligns with the Big Data Storage and Processing course objectives — implementing a complete end-to-end data pipeline 
+using Apache Kafka, Apache Spark, and a NoSQL database under a Kappa Architecture.
 
-This makes the problem highly suitable for a **Big Data processing architecture**, where Spark, Kafka, and NoSQL technologies can be applied.
+## Problem Definition
+AI model training is computationally intensive, and energy costs are often invisible. 
+Currently, there is no unified, transparent system that tracks how much energy (and resulting emissions) is used per training run, per user, or per model.
 
-### Scope and Limitations
-- Focus on real-time ingestion and processing of monitoring data.  
-- Simulated or small-scale real hardware metrics during development.  
-- Out of scope: model training optimization itself (focus is on monitoring infrastructure).  
+This project addresses that gap by creating a scalable data pipeline that:
+- Continuously collects low-level system metrics (CPU, GPU, RAM, etc.)
+- Calculates energy and CO₂ consumption in near real time
+- Stores and visualizes this information for sustainability tracking and optimization
 
----
+## Objectives
+- Design a Kappa-based streaming pipeline for energy/emission monitoring.
+- Collect relevant system, model, and user metrics during AI training.
+- Process and aggregate data using Spark Structured Streaming.
+- Store results in NoSQL and distributed storage.
+- Visualize emissions and training efficiency across runs and users.
 
-## 2. Architecture and Design
-
-### 2.1 Architecture Model: **Kappa Architecture**
-The system is designed following the **Kappa Architecture**, as all data (historical and live) is processed via a unified stream-processing pipeline.
-
-### 2.2 High-Level Overview
+## Architecture Overview (Kappa Model)
 ```
-          ┌────────────────────────────────────────┐
-          │   Training Environment (PyTorch, etc.) │
-          │ Generates real-time hardware metrics   │
-          └────────────────────────────────────────┘
-                             │
-                             ▼
-          ┌────────────────────────────────────────┐
-          │ Data Ingestion Layer (Kafka Producer)   │
-          │ Collects metrics (CPU, GPU, power, etc.)│
-          └────────────────────────────────────────┘
-                             │
-                             ▼
-          ┌────────────────────────────────────────┐
-          │ Data Processing Layer (Spark Streaming) │
-          │ - Parses JSON from Kafka                │
-          │ - Calculates energy & CO₂ emissions     │
-          │ - Performs windowed aggregations        │
-          └────────────────────────────────────────┘
-                             │
-                             ▼
-          ┌────────────────────────────────────────┐
-          │ Data Storage Layer                      │
-          │ - Hot data: MongoDB / Cassandra (NoSQL) │
-          │ - Cold data: HDFS (Parquet)             │
-          └────────────────────────────────────────┘
-                             │
-                             ▼
-          ┌────────────────────────────────────────┐
-          │ Visualization Layer (Streamlit / Grafana)│
-          │ Real-time dashboard & aggregated reports │
-          └────────────────────────────────────────┘
+ ┌───────────────────────────────────────────────────────┐
+ │                   Metrics Collector                   │
+ │  (psutil, pynvml, system data → JSON messages)        │
+ └───────────────────────────────────────────────────────┘
+                      │
+                      ▼
+ ┌───────────────────────────────────────────────────────┐
+ │                Apache Kafka (Ingestion)               │
+ │  Receives metric events from multiple training runs   │
+ └───────────────────────────────────────────────────────┘
+                      │
+                      ▼
+ ┌───────────────────────────────────────────────────────┐
+ │         Spark Structured Streaming (Processing)       │
+ │  - Parse JSON messages                                │
+ │  - Aggregate energy/CO₂ over time and users           │
+ │  - Join with reference data (carbon intensity)        │
+ └───────────────────────────────────────────────────────┘
+                      │
+                      ▼
+ ┌───────────────────────────────────────────────────────┐
+ │            NoSQL Database (e.g., MongoDB)             │
+ │  - Stores processed metrics for visualization         │
+ └───────────────────────────────────────────────────────┘
+                      │
+                      ▼
+ ┌───────────────────────────────────────────────────────┐
+ │          Visualization Dashboard (Streamlit)          │
+ │  - Displays CO₂ emissions per run, per user           │
+ │  - Trends, energy efficiency, hotspots                │
+ └───────────────────────────────────────────────────────┘
 ```
 
----
+## What We Track — and Why
+The following metrics are collected to understand hardware usage, energy draw, and contextual training details.
 
-## 3. Data Design and Processing
+| Category | Example Metrics | Purpose |
+|-----------|----------------|----------|
+| CPU | Utilization %, Power (W), Core count | Estimate power draw from processor activity |
+| GPU | Utilization %, Power (W), Memory usage | Measure major contributor to energy use |
+| RAM | Used / Total memory | Understand memory load impact |
+| IO / Network | Disk read/write, network traffic | Capture additional resource costs |
+| System Info | Hostname, OS, Region | Context for grid intensity & configuration |
+| Training Context | Run ID, User ID, Model name, Epoch | Enable per-run and per-user aggregation |
+| CO₂ Intensity | g CO₂ / kWh (by region) | Convert energy to emissions |
+| Timestamps | UTC time | Enable time series analysis |
 
-### 3.1 Data Ingestion
-- Metrics are collected from the **training environment** using Python scripts.  
-- Each record (JSON) includes:
-  ```json
-  {
-    "timestamp": "2025-10-13T12:34:56Z",
-    "run_id": "run_2025_10_13_1234",
-    "gpu_power_w": 128.4,
-    "gpu_utilization_pct": 92.1,
-    "cpu_power_w": 75.2,
-    "region_iso": "DEU",
-    "grid_carbon_intensity_g_per_kwh": 420
-  }
-  ```
-- Records are sent to **Kafka** via a producer.
+## Example of Collected Data (JSON Event)
+```json
+{
+  "timestamp": "2025-10-14T14:25:23Z",
+  "run_id": "run_001",
+  "user_id": "alice",
+  "model_name": "resnet18",
+  "cpu_utilization_pct": 73.4,
+  "gpu_power_w": 142.3,
+  "gpu_mem_used_mb": 2104,
+  "ram_used_mb": 8650,
+  "net_sent_mb": 1.4,
+  "net_recv_mb": 0.8,
+  "region_iso": "DE",
+  "grid_carbon_intensity_g_per_kwh": 401
+}
+```
 
-### 3.2 Data Processing (Apache Spark)
-Using **Structured Streaming**, Spark consumes data from Kafka and performs:
-- **Window aggregations** (e.g., total energy per 5-second window)  
-- **Custom UDFs** to compute energy and CO₂ values:
-  ```python
-  energy_kwh = power_w * delta_t / 3_600_000
-  co2_kg = energy_kwh * grid_carbon_intensity / 1000
-  ```
-- **Advanced transformations**: joins with grid emission data, pivot by device type, and cumulative totals.  
-- **Watermarking** ensures proper handling of late data.
+## Data Flow & Processing
+1. **Metrics Collector**  
+   A lightweight Python service collects local system stats using psutil and pynvml.  
+   Each record is serialized as JSON and sent to a Kafka topic (`training.metrics`).
 
-### 3.3 Data Storage
-| Type | Technology | Purpose |
-|------|-------------|----------|
-| **Hot Storage** | MongoDB / Cassandra | Real-time queries and dashboards |
-| **Cold Storage** | HDFS (Parquet) | Historical analytics and ML-based forecasting |
-| **Schema Registry** | Kafka + Avro | Defines and validates message structure |
+2. **Kafka (Ingestion Layer)**  
+   Acts as a distributed buffer for metric streams coming from multiple machines or users.
 
-Partitioning Strategy:
-- Partition by `run_id` and date (`YYYY-MM-DD`)  
-- Bucketing by `region_iso` for fast aggregation  
+3. **Spark Structured Streaming**  
+   - Reads metric messages from Kafka  
+   - Performs transformations: windowed aggregations, joins, and custom UDFs  
+   - Calculates:
+     ```python
+     energy_kwh = (gpu_power_w + cpu_power_w) * delta_t / 3_600_000
+     emissions_kg = energy_kwh * grid_carbon_intensity_g_per_kwh / 1000
+     ```
+   - Stores rolling aggregates per user and model.
 
-### 3.4 Data Visualization
-The dashboard displays:
-- Total energy and emissions per run  
-- Real-time power and CO₂ curves  
-- Comparisons across models, hardware, and regions  
-- Exportable reports (PDF/CSV)
+4. **Storage Layer**  
+   - MongoDB (Hot Data): For latest metrics and visualization.  
+   - HDFS (Cold Data): For long-term retention and analytics.
 
-Tools: **Streamlit**, **Grafana**, or **Kibana**.
+5. **Visualization Layer**  
+   - Streamlit dashboard displaying:
+     - Energy & CO₂ over time  
+     - Top energy-consuming models/users  
+     - Regional carbon impact comparison  
 
----
+## Data Schema (Spark)
+| Column | Type | Description |
+|--------|------|-------------|
+| timestamp | Timestamp | Measurement time |
+| run_id | String | Training run identifier |
+| user_id | String | User who started training |
+| cpu_utilization_pct | Double | CPU load |
+| gpu_power_w | Double | GPU energy draw |
+| ram_used_mb | Double | RAM usage |
+| energy_kwh | Double | Estimated energy used |
+| emissions_kg | Double | Estimated CO₂ emissions |
+| region_iso | String | Country code |
+| model_name | String | Model under training |
 
-## 4. Technology Stack
-
+## Technology Stack
 | Layer | Technology | Purpose |
 |-------|-------------|----------|
-| Data Ingestion | Apache Kafka | Real-time message streaming |
-| Processing | Apache Spark (PySpark) | Structured streaming and batch aggregation |
-| Storage | HDFS (cold) + MongoDB (hot) | Persistent and scalable storage |
-| Visualization | Streamlit / Grafana | Dashboard and analytics |
-| Deployment | Kubernetes | Scalable cluster management |
-| Monitoring | Prometheus + Grafana | System metrics and logs |
+| Ingestion | Apache Kafka | Distributed message queue |
+| Processing | Apache Spark (PySpark) | Real-time stream processing |
+| Storage | MongoDB / HDFS | Hot and cold data storage |
+| Visualization | Streamlit | Dashboard for emissions & energy |
+| Monitoring | Prometheus (optional) | System metrics tracking |
+| Deployment | Kubernetes | Container orchestration |
 
----
+## Current Progress
+- Defined project concept and data model  
+- Designed Kappa architecture  
+- Drafted metrics collector (Python prototype)  
+- Next steps: Implement Kafka ingestion, Spark consumer, and visualization
 
-## 📊 5. Example Data Flow (End-to-End)
-```
-Training Script → Kafka Producer → Kafka Topic
-→ Spark Structured Streaming → Energy/CO₂ computation
-→ MongoDB (real-time) + HDFS (batch storage)
-→ Streamlit Dashboard for visualization
-```
+## Next Steps
+- Implement Kafka Producer for metric streaming  
+- Develop Spark Structured Streaming job for real-time aggregation  
+- Connect MongoDB for fast retrieval  
+- Build Streamlit dashboard for visualization  
+- Evaluate scalability with multiple concurrent users and training runs  
 
-### Example Aggregation Query (Spark SQL)
-```sql
-SELECT
-  run_id,
-  window(timestamp, "5 minutes").start AS window_start,
-  SUM(energy_kwh) AS total_energy,
-  SUM(co2_kg) AS total_emissions
-FROM energy_stream
-GROUP BY run_id, window(timestamp, "5 minutes")
-ORDER BY window_start;
-```
-
----
-
-## 6. Current Progress
-
-| Area | Description | Status |
-|------|--------------|--------|
-| Topic definition | Energy & emission monitoring pipeline | done |
-| Architecture design | Defined end-to-end data flow | in progress |
-| Tech stack selection | Spark, Kafka, MongoDB, HDFS | in progress |
-| Data ingestion script | Produces mock training metrics | Planned |
-| Spark streaming setup | Prototype under testing | Planned |
-| Visualization | Basic Streamlit dashboard | Planned |
-
----
-
-## 7. Next Steps
-1. Implement **Kafka producers** to simulate multiple training nodes.  
-2. Build the **Spark Structured Streaming job** to process metrics in real-time.  
-3. Store aggregated results in **MongoDB** and raw data in **HDFS**.  
-4. Develop **Streamlit dashboard** for visualization and analytics.  
-5. Containerize the system and deploy it on **Kubernetes** for scalability.  
-
----
-
-## 8. Lessons to Document Later
-As development progresses, the following lesson categories will be documented:
-- **Data Ingestion:** handling streaming metrics and schema evolution  
-- **Data Processing:** Spark performance tuning and window aggregations  
-- **Data Storage:** partitioning strategies and compression formats  
-- **System Integration:** scaling Kafka & Spark clusters under Kubernetes  
-- **Monitoring:** pipeline observability using Prometheus + Grafana  
-
----
-
-## 9. Long-Term Vision
-The final goal is a **real-time sustainability monitoring platform** capable of:
-- Tracking emissions from distributed AI training systems  
-- Supporting multiple data centers and hardware configurations  
-- Providing analytics and optimization insights based on energy efficiency  
-
-This project will demonstrate **end-to-end Big Data pipeline design**—from ingestion to visualization—while addressing a **real-world sustainability problem** in AI research.
+## References
+- CodeCarbon GitHub Repository: https://github.com/mlco2/codecarbon  
+- Apache Spark Structured Streaming Guide: https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html  
+- ElectricityMap Carbon Intensity API: https://api.electricitymap.org/
