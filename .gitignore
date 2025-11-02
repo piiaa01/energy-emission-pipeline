@@ -24,3 +24,6 @@ data/tmp/
 # OS
 .DS_Store
 Thumbs.db
+
+#IDEs
+.vscode/

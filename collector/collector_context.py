@@ -3,7 +3,7 @@ import time
 import threading
 from datetime import datetime
 from typing import Optional, Dict
-
+from kafka.producer import KafkaProducerWrapper
 import psutil
 
 # Try NVML for real GPU power; otherwise fall back to estimates.
@@ -144,6 +144,7 @@ class MetricsCollector:
         self.cpu_tdp_w = float(cpu_tdp_w)
         self.gpu_tdp_w = float(gpu_tdp_w)
         self.prefer_nvml = prefer_nvml
+        self.kafka_producer = KafkaProducerWrapper()
 
         # If no explicit intensity provided, use region lookup with fallback 400 g/kWh.
         self.grid_intensity_g_per_kwh = (
@@ -202,6 +203,11 @@ class MetricsCollector:
             json.dump(rec, self._f)
             self._f.write("\n")
             self._f.flush()
+            
+            self.kafka_producer.produce(
+                topic="training.metrics",
+                value=json.dumps(rec).encode("utf-8")
+            )
 
             # Sleep the remainder of the interval (if any).
             to_sleep = max(0.0, self.interval_s - (time.monotonic() - now))
