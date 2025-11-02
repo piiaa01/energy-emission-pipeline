@@ -166,6 +166,183 @@ The following metrics are collected to understand hardware usage, energy draw, a
 - Drafted metrics collector (Python prototype)  
 - Next steps: Implement Kafka ingestion, Spark consumer, and visualization
 
+## Implementation Details and Usage
+
+This section describes the currently implemented components of the energy emission pipeline and how to set them up locally for testing.  
+The Kafka producer and tracker are fully operational and serve as the foundation for the ingestion layer in the pipeline.
+
+### Project Structure
+energy emission pipeline/
+│
+├── collector/
+│   └── collector_context.py
+│
+├── kafka/
+│   ├── docker-compose.yaml
+│   ├── config.yaml
+│   ├── config_loader.py
+│   ├── producer.py
+│   └── tracker.py
+│
+├── train/
+│   └── train_with_metrics.py
+│
+├── main.py
+└── README.md
+
+---
+
+### Configuration
+
+All configuration values are stored in `kafka/config.yaml` and loaded dynamically by all Kafka-related scripts.
+
+```yaml
+project:
+  name: energy-emission-pipeline
+  version: 1.0.0
+  environment: local
+
+kafka:
+  bootstrap_servers: "localhost:9092"
+  topic_training_metrics: "training.metrics"
+  group_id: "record-tracker"
+  replication_factor: 1
+  partitions: 1
+  auto_offset_reset: "earliest"
+
+paths:
+  output_file: "./data/output.jsonl"
+  logs: "./logs/app.log"
+
+training:
+  model_type: "logistic_regression"
+  learning_rate: 0.01
+  epochs: 10
+  batch_size: 32
+```
+
+---
+
+### Kafka Setup (Local, via Docker)
+
+The Kafka broker runs in KRaft mode.  
+Start it by navigating to the `kafka/` directory and running:
+
+```bash
+docker compose up -d
+```
+
+Once started, check the logs to ensure the broker is active:
+
+```bash
+docker logs -f kafka
+```
+
+Expected output:
+```
+Kafka Server started
+```
+
+Kafka is configured to automatically create topics:
+```
+KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+```
+
+---
+
+### Configuration Loader
+
+The file `kafka/config_loader.py` loads all configuration values from `config.yaml` and makes them accessible across modules.
+
+Example usage:
+```python
+from kafka.config_loader import Config
+config = Config()
+print(config.get("kafka", "bootstrap_servers"))
+```
+
+---
+
+### Producer
+
+The Kafka producer publishes JSON messages to the configured topic.
+
+Run in a terminal:
+```bash
+python -m kafka.producer
+```
+
+Expected output:
+```
+Sent to Kafka: topic=training.metrics, partition=0, offset=0
+```
+
+Each message follows this structure:
+```json
+{
+  "user_id": "x",
+  "acc": 0.91,
+  "epoch": 10,
+  "loss": 0.32
+}
+```
+
+---
+
+### Tracker
+
+The Kafka tracker listens for incoming messages and prints them to the console.  
+Run this in a **separate terminal**:
+
+```bash
+python -m kafka.tracker
+```
+
+Expected output:
+```
+KafkaTracker initialized and subscribed to topic 'training.metrics'
+Received record from x
+```
+
+---
+
+### End-to-End Test Workflow
+
+| Step | Action | Expected Result |
+|------|---------|----------------|
+| 1 | Start Kafka (`docker compose up -d`) | Kafka container is running |
+| 2 | Run tracker | Tracker subscribes to topic and waits for messages |
+| 3 | Run producer | Message is successfully sent to Kafka |
+| 4 | Observe tracker output | “Received record from x” is displayed |
+| 5 | (Optional) Verify via Docker CLI | Message can be seen using Kafka console consumer |
+
+---
+
+### Optional: Verify via Kafka CLI
+
+You can also manually verify messages directly within the Kafka container:
+
+```bash
+docker exec -it kafka kafka-console-consumer   --bootstrap-server localhost:9092   --topic training.metrics   --from-beginning   --timeout-ms 5000
+```
+
+Expected output:
+```
+{"user_id": "x", "acc": 0.91, "epoch": 10, "loss": 0.32}
+```
+
+---
+
+### Next Steps
+
+- Integrate the Kafka producer with the actual model training output.  
+- Extend the tracker to write received messages into MongoDB for persistence.  
+- Implement a Spark Structured Streaming job to process and aggregate incoming metrics.  
+- Connect the Streamlit dashboard to MongoDB for real-time visualization of emissions and training energy usage.  
+- Add carbon intensity factors per region to compute precise CO₂ estimates.
+
+---
+
 ## References
 - CodeCarbon GitHub Repository: https://github.com/mlco2/codecarbon  
 - Apache Spark Structured Streaming Guide: https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html  
