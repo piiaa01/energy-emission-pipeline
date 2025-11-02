@@ -12,7 +12,7 @@ project:
 kafka:
   bootstrap_servers: "localhost:9092"
   topic_training_metrics: "training.metrics"
-  group_id: "record-tracker"
+  group_id: "record-tracker-test"
   replication_factor: 1
   partitions: 1
   auto_offset_reset: "earliest"

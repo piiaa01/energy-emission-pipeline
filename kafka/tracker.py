@@ -2,25 +2,30 @@ import json
 import signal
 import sys
 from confluent_kafka import Consumer
+from kafka.config_loader import Config
 
 
 class KafkaTracker:
-    def __init__(
-        self,
-        subscribe_topic: str = "training.metrics",
-        server: str = "localhost:9092",
-        group_id: str = "record-tracker"
-    ):
-        self.topic = subscribe_topic
+    """Consumes and prints Kafka messages from the configured topic."""
+
+    def __init__(self):
+        config = Config()
+        self.topic = config.get("kafka", "topic_training_metrics")
+        self.server = config.get("kafka", "bootstrap_servers")
+        self.group_id = config.get("kafka", "group_id")
+        self.offset = config.get("kafka", "auto_offset_reset", default="earliest")
+
         self.consumer = Consumer({
-            "bootstrap.servers": server,
-            "group.id": group_id,
-            "auto.offset.reset": "earliest"
+            "bootstrap.servers": self.server,
+            "group.id": self.group_id,
+            "auto.offset.reset": self.offset
         })
-        self.consumer.subscribe([subscribe_topic])
-        print(f"KafkaTracker initialized and subscribed to topic '{subscribe_topic}'")
+
+        self.consumer.subscribe([self.topic])
+        print(f"KafkaTracker initialized and subscribed to topic '{self.topic}'")
 
     def track(self):
+        """Continuously consume messages and print their content."""
         try:
             while True:
                 msg = self.consumer.poll(1.0)
@@ -46,15 +51,11 @@ class KafkaTracker:
 
 
 def _run():
-    tracker = KafkaTracker(
-        subscribe_topic="training.metrics",
-        server="localhost:9092",
-        group_id="record-tracker"
-    )
+    tracker = KafkaTracker()
 
-    # Graceful shutdown on SIGTERM/SIGINT
     def _stop(*_):
         raise KeyboardInterrupt()
+
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
