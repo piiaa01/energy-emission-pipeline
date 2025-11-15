@@ -1,0 +1,29 @@
+Von jetzt an immer so verwenden:
+powershell# Stelle sicher, dass venv aktiviert ist
+.venv\Scripts\Activate.ps1
+
+# Führe Scripts aus mit -m
+python -m kafka.producer
+python -m kafka.tracker
+
+Nützliche Docker-Befehle
+powershell# Kafka Logs ansehen
+docker-compose logs -f kafka
+
+# Alle Container anzeigen
+docker-compose ps
+
+# Kafka stoppen
+docker-compose down
+
+# Kafka neu starten
+docker-compose restart
+Topics anzeigen
+powershell# In den Kafka Container gehen
+docker exec -it kafka-kafka-1 bash
+
+# Topics auflisten
+kafka-topics --bootstrap-server localhost:9092 --list
+
+# Nachrichten im Topic lesen
+kafka-console-consumer --bootstrap-server localhost:9092 --topic training.metrics --from-
