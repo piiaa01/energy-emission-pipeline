@@ -1,0 +1,120 @@
+services:
+  # -----------------------------
+  #infrastructure: MongoDB
+  # -----------------------------
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: energy_emissions
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - energy-pipeline
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express
+    restart: unless-stopped
+    ports:
+      - "8081:8081"     #ui: http://localhost:8081
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://mongodb:27017/
+      ME_CONFIG_BASICAUTH: "false"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - energy-pipeline
+
+  # -----------------------------
+  #infrastructure: kafka
+  # -----------------------------
+  kafka:
+    image: confluentinc/cp-kafka:8.1.0
+    container_name: kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "9093:9093"         
+    environment:
+      KAFKA_KRAFT_MODE: 'true'
+      CLUSTER_ID: '1L6g7nGhU-eAKfL--X25wo'
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      #single-broker settings
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+      #listeners
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      #log directory (persistent volume)
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      
+      #automatically create topics if they do not exist
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka_kraft:/var/lib/kafka/data
+    networks:
+      - energy-pipeline
+
+  # -----------------------------
+  #app: training + metricsCollector
+  # -----------------------------
+  trainer:
+    build: .
+    container_name: trainer
+    command: ["python", "train/train_with_metrics.py"]
+    depends_on:
+      - kafka
+    networks:
+      - energy-pipeline
+
+  # -----------------------------
+  #app: kafkaConsumer (tracker)
+  # -----------------------------
+  tracker:
+    build: .
+    container_name: tracker
+    command: ["python", "kafka/tracker.py"]
+    depends_on:
+      - kafka
+    networks:
+      - energy-pipeline
+
+  # -----------------------------
+  #app: dashboard (streamlit)
+  # -----------------------------
+  dashboard:
+    build: .
+    container_name: dashboard
+    command: ["streamlit", "run", "dashboard/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"          #dashboard: http://localhost:8501
+    depends_on:
+      - mongodb
+    networks:
+      - energy-pipeline
+
+volumes:
+  kafka_kraft:
+  mongodb_data:
+  mongodb_config:
+
+networks:
+  energy-pipeline:
+    driver: bridge
