@@ -1,0 +1,7 @@
+psutil
+confluent-kafka
+PyYAML
+pymongo
+streamlit
+pandas
+plotly
