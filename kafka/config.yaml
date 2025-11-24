@@ -10,7 +10,7 @@ project:
 # Kafka settings
 # ================================
 kafka:
-  bootstrap_servers: "localhost:9092"
+  bootstrap_servers: "kafka:9092"
   topic_training_metrics: "training.metrics"
   group_id: "record-tracker-test"
   replication_factor: 1
