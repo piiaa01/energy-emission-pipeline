@@ -1,32 +1,31 @@
+import os
+import sys
 import time
 import math
 import random
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from collector.collector_context import MetricsCollector
 from kafka.config_loader import Config
 
 
 def train_with_metrics():
-    """
-    Training loop that reports training state (epoch, step, loss, accuracy)
-    to the MetricsCollector.
-
-    Currently this is a simulated training loop, but you can easily replace
-    the inner part with a real model training loop.
-    """
     config = Config()
     training_cfg = config.training()
     project_env = config.get("project", "environment", default="local")
 
     model_type = training_cfg.get("model_type", "dummy_model")
     learning_rate = float(training_cfg.get("learning_rate", 0.01))
-    epochs = int(training_cfg.get("epochs", 3))
+    epochs = int(training_cfg.get("epochs", 10))
     batch_size = int(training_cfg.get("batch_size", 32))
     dataset_name = training_cfg.get("dataset_name", "dummy_dataset")
 
-    output_file = config.get("paths", "output_file", default="./data/output.jsonl")
+    paths_cfg = config.paths()
+    output_file = paths_cfg.get("output_file", "./data/output.jsonl")
 
-    
     user_id = "pia"
     region = "DE"
     framework = "sklearn"
@@ -51,15 +50,12 @@ def train_with_metrics():
         environment=project_env,
     ) as collector:
         global_step = 0
-        steps_per_epoch = 100  # for the simulated example
+        steps_per_epoch = 100
 
         for epoch in range(1, epochs + 1):
             print(f"Epoch {epoch}/{epochs}")
-
             for step in range(1, steps_per_epoch + 1):
                 global_step += 1
-
-                # Simulated "training": loss decays, accuracy increases over time.
                 progress = global_step / float(epochs * steps_per_epoch)
                 loss = max(
                     0.1,
@@ -70,7 +66,6 @@ def train_with_metrics():
                     0.5 + 0.5 * progress + random.uniform(-0.02, 0.02),
                 )
 
-                # Update collector with current training state
                 collector.update_training_state(
                     epoch=epoch,
                     step=step,
@@ -78,7 +73,6 @@ def train_with_metrics():
                     accuracy=accuracy,
                 )
 
-                # Simulated compute time per step
                 time.sleep(0.05)
 
                 if step % 20 == 0:

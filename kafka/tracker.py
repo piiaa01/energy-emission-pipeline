@@ -2,6 +2,7 @@ import json
 import signal
 import sys
 from typing import Optional, Dict, Any
+import os
 
 from confluent_kafka import Consumer
 from kafka.config_loader import Config
@@ -35,8 +36,9 @@ class KafkaTracker:
         self.consumer = Consumer(consumer_conf)
         self.consumer.subscribe([self.metrics_topic, self.summary_topic])
 
-        # MongoDB client (inside Docker network: host "mongodb")
-        mongo_uri = "mongodb://mongodb:27017/"
+        
+        mongo_uri = os.getenv("MONGO_URI", "mongodb://mongodb:27017/")
+
         try:
             self.mongo_client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
             self.mongo_client.server_info()  # test connection

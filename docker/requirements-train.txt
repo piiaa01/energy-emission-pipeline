@@ -1,0 +1,4 @@
+psutil
+confluent-kafka
+pymongo
+pyyaml

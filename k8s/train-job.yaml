@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: training-run
+  namespace: bigdata-pipeline
+spec:
+  template:
+    metadata:
+      labels:
+        app: trainer
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: trainer
+          image: ghcr.io/piiaa01/trainer:latest
+          envFrom:
+            - configMapRef:
+                name: pipeline-config
+  backoffLimit: 0
