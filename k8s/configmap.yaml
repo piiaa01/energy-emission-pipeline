@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipeline-config
+  namespace: bigdata-pipeline
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-svc:9092"
+  KAFKA_METRICS_TOPIC: "training.metrics"
+
+  MONGODB_URI: "mongodb://mongodb:27017"
+  MONGODB_DB: "energy_metrics"
+  MONGODB_AGG_COLLECTION: "aggregated_metrics"
+
+  SPARK_CHECKPOINT_DIR: "/checkpoints/energy-metrics"

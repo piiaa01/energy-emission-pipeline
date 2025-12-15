@@ -1,0 +1,13 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY docker/requirements-train.txt ./requirements-train.txt
+RUN pip install --no-cache-dir -r requirements-train.txt
+
+COPY . .
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "train.train_with_metrics"]

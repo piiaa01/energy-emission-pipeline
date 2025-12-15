@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: energy-streaming-job
+  namespace: bigdata-pipeline
+spec:
+  template:
+    spec:
+      serviceAccountName: spark
+      restartPolicy: OnFailure
+      containers:
+        - name: spark-submit
+          image: ghcr.io/piiaa01/spark-app:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: K8S_API
+              value: "https://kubernetes.default.svc"
+          command: ["/opt/bitnami/spark/bin/spark-submit"]
+          args:
+            - "--master"
+            - "k8s://https://kubernetes.default.svc"
+            - "--deploy-mode"
+            - "cluster"
+            - "--name"
+            - "energy-streaming"
+            - "--packages"
+            - "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0"
+            - "--conf"
+            - "spark.executor.instances=3"
+            - "--conf"
+            - "spark.kubernetes.container.image=ghcr.io/piiaa01/spark-app:latest"
+            - "--conf"
+            - "spark.kubernetes.namespace=bigdata-pipeline"
+            - "--conf"
+            - "spark.kubernetes.authenticate.driver.serviceAccountName=spark"
+            - "--conf"
+            - "spark.kubernetes.authenticate.executor.serviceAccountName=spark"
+            - "local:///app/streaming_job.py"

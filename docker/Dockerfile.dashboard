@@ -1,0 +1,17 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY docker/requirements-dashboard.txt ./requirements-dashboard.txt
+RUN pip install --no-cache-dir -r requirements-dashboard.txt
+
+# Copy application code
+COPY dashboard/ ./dashboard/
+
+ENV PYTHONUNBUFFERED=1
+
+# Streamlit default port
+EXPOSE 8501
+
+CMD ["streamlit", "run", "dashboard/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
