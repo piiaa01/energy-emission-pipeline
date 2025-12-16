@@ -4,35 +4,57 @@ metadata:
   name: energy-streaming-job
   namespace: bigdata-pipeline
 spec:
+  backoffLimit: 0
   template:
+    metadata:
+      labels:
+        app: energy-streaming-job
     spec:
       serviceAccountName: spark
-      restartPolicy: OnFailure
+      restartPolicy: Never
+
       containers:
         - name: spark-submit
           image: ghcr.io/piiaa01/spark-app:latest
           imagePullPolicy: IfNotPresent
+
+          # Load Kafka/Mongo/checkpoint settings from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: pipeline-config
+
+          # Expose pod IP so we can pass it to Spark (executors must connect back to the driver)
           env:
-            - name: K8S_API
-              value: "https://kubernetes.default.svc"
-          command: ["/opt/bitnami/spark/bin/spark-submit"]
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+
+          # Use a shell so $POD_IP is expanded (args list does NOT expand variables)
+          command: ["/bin/bash", "-lc"]
           args:
-            - "--master"
-            - "k8s://https://kubernetes.default.svc"
-            - "--deploy-mode"
-            - "cluster"
-            - "--name"
-            - "energy-streaming"
-            - "--packages"
-            - "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0"
-            - "--conf"
-            - "spark.executor.instances=3"
-            - "--conf"
-            - "spark.kubernetes.container.image=ghcr.io/piiaa01/spark-app:latest"
-            - "--conf"
-            - "spark.kubernetes.namespace=bigdata-pipeline"
-            - "--conf"
-            - "spark.kubernetes.authenticate.driver.serviceAccountName=spark"
-            - "--conf"
-            - "spark.kubernetes.authenticate.executor.serviceAccountName=spark"
-            - "local:///app/streaming_job.py"
+            - |
+              set -euo pipefail
+
+              /opt/bitnami/spark/bin/spark-submit \
+                --master k8s://https://kubernetes.default.svc \
+                --deploy-mode client \
+                --name energy-metrics-raw \
+                --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 \
+                --conf spark.kubernetes.namespace=bigdata-pipeline \
+                --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark \
+                --conf spark.kubernetes.authenticate.executor.serviceAccountName=spark \
+                --conf spark.kubernetes.container.image=ghcr.io/piiaa01/spark-app:latest \
+                --conf spark.driver.bindAddress=0.0.0.0 \
+                --conf spark.driver.host=$POD_IP \
+                --conf spark.driver.port=7078 \
+                --conf spark.blockManager.port=7079 \
+                --conf spark.ui.port=4040 \
+                --conf spark.executor.instances=2 \
+                --conf spark.executor.memory=1g \
+                --conf spark.driver.memory=1g \
+                --conf spark.pyspark.python=/opt/venv/bin/python \
+                --conf spark.pyspark.driver.python=/opt/venv/bin/python \
+                --conf spark.executorEnv.PYSPARK_PYTHON=/opt/venv/bin/python \
+                --conf spark.executorEnv.PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python \
+                local:///app/streaming_job.py

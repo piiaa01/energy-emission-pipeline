@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Any
+from typing import Dict, Any, List
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
@@ -16,7 +16,7 @@ def get_env(name: str, default: str) -> str:
 def build_spark() -> SparkSession:
     spark = (
         SparkSession.builder
-        .appName("EnergyMetricsStreamingJob")
+        .appName("EnergyMetricsRawStreamingJob")
         .getOrCreate()
     )
     spark.sparkContext.setLogLevel("WARN")
@@ -30,7 +30,7 @@ def read_kafka_stream(spark: SparkSession) -> DataFrame:
 
     print(f"[streaming_job] Reading from Kafka topic '{kafka_topic}' at '{kafka_bootstrap}'")
 
-    raw_stream = (
+    raw = (
         spark.readStream
         .format("kafka")
         .option("kafka.bootstrap.servers", kafka_bootstrap)
@@ -39,98 +39,83 @@ def read_kafka_stream(spark: SparkSession) -> DataFrame:
         .load()
     )
 
-    value_str = raw_stream.select(F.col("value").cast("string").alias("value"))
+    # Define a permissive schema for the metrics payload.
+    # Missing fields will simply be null.
+    metrics_schema = T.StructType(
+        [
+            T.StructField("timestamp", T.StringType(), True),
+            T.StructField("run_id", T.StringType(), True),
+            T.StructField("user_id", T.StringType(), True),
+            T.StructField("model_name", T.StringType(), True),
+            T.StructField("dataset_name", T.StringType(), True),
+            T.StructField("region_iso", T.StringType(), True),
+            T.StructField("framework", T.StringType(), True),
+            T.StructField("environment", T.StringType(), True),
+            T.StructField("epoch", T.IntegerType(), True),
+            T.StructField("step", T.IntegerType(), True),
+            T.StructField("loss", T.DoubleType(), True),
+            T.StructField("accuracy", T.DoubleType(), True),
+            T.StructField("cpu_utilization_pct", T.DoubleType(), True),
+            T.StructField("energy_kwh", T.DoubleType(), True),
+            T.StructField("emissions_kg", T.DoubleType(), True),
+            T.StructField("cumulative_energy_kwh", T.DoubleType(), True),
+            T.StructField("cumulative_emissions_kg", T.DoubleType(), True),
+        ]
+    )
 
-    metrics_schema = T.StructType([
-        T.StructField("timestamp", T.StringType(), True),
-        T.StructField("project_id", T.StringType(), True),
-        T.StructField("user_id", T.StringType(), True),
-        T.StructField("run_id", T.StringType(), True),
-        T.StructField("energy_kwh", T.DoubleType(), True),
-        T.StructField("emissions_kg", T.DoubleType(), True),
-        T.StructField("model_name", T.StringType(), True),
-        T.StructField("dataset_name", T.StringType(), True),
-        T.StructField("region", T.StringType(), True),
-    ])
+    df = raw.select(F.col("value").cast("string").alias("json"))
 
-    json_parsed = value_str.select(
-        F.from_json(F.col("value"), metrics_schema).alias("data")
-    ).select("data.*")
+    # Parse JSON into a struct, then expand struct fields
+    df = df.select(F.from_json(F.col("json"), metrics_schema).alias("data")).select("data.*")
 
-    # IMPORTANT: parse ISO timestamps with 'T' correctly
-    json_parsed = json_parsed.withColumn(
+    # Optional: keep a Spark timestamp column for potential time filtering later
+    # Supports timestamps like "2025-12-16T03:19:27.123Z" or without millis.
+    df = df.withColumn(
         "event_time",
-        F.to_timestamp("timestamp", "yyyy-MM-dd'T'HH:mm:ss")
+        F.to_timestamp(F.regexp_replace(F.col("timestamp"), "Z$", ""), "yyyy-MM-dd'T'HH:mm:ss.SSS")
     )
 
-    print("[streaming_job] Kafka stream schema:")
-    json_parsed.printSchema()
-
-    return json_parsed
+    return df
 
 
-def aggregate_metrics(df: DataFrame) -> DataFrame:
-    windowed = (
-        df
-        .withWatermark("event_time", "1 minute")
-        .groupBy(
-            F.window("event_time", "1 minute").alias("time_window"),
-            F.col("user_id"),
-            F.col("project_id"),
-            F.col("run_id"),
-        )
-        .agg(
-            F.sum("energy_kwh").alias("total_energy_kwh"),
-            F.sum("emissions_kg").alias("total_emissions_kg"),
-        )
-    )
+def write_raw_to_mongo(batch_df: DataFrame, batch_id: int) -> None:
+    # Convert to JSON-compatible dicts and drop Spark internal columns if any
+    rows = batch_df.drop("event_time").collect()
+    records: List[Dict[str, Any]] = [row.asDict(recursive=True) for row in rows]
 
-    return windowed
-
-
-def write_batch_to_mongo(batch_df: DataFrame, batch_id: int) -> None:
-    records: List[Dict[str, Any]] = [row.asDict() for row in batch_df.collect()]
     if not records:
-        print(f"[streaming_job] Batch {batch_id}: no records, skipping.")
+        print(f"[streaming_job] Batch {batch_id}: no records")
         return
 
     mongo_uri = get_env("MONGODB_URI", "mongodb://mongodb:27017")
-    mongo_db = get_env("MONGODB_DB", "energy_metrics")
-    mongo_coll = get_env("MONGODB_AGG_COLLECTION", "aggregated_metrics")
+    mongo_db = get_env("MONGODB_DB", "energy_emissions")
+    mongo_coll = get_env("MONGODB_METRICS_COLLECTION", "training_metrics")
 
-    print(f"[streaming_job] Batch {batch_id}: inserting {len(records)} records into MongoDB collection {mongo_db}.{mongo_coll}")
+    print(
+        f"[streaming_job] Batch {batch_id}: inserting {len(records)} "
+        f"records into MongoDB collection {mongo_db}.{mongo_coll}"
+    )
 
     client = MongoClient(mongo_uri)
-    db = client[mongo_db]
-    coll = db[mongo_coll]
-
-    docs: List[Dict[str, Any]] = []
-    for rec in records:
-        window = rec.pop("time_window", None)
-        if window is not None:
-            rec["window_start"] = window.start.isoformat()
-            rec["window_end"] = window.end.isoformat()
-        docs.append(rec)
-
-    if docs:
-        coll.insert_many(docs)
-
-    client.close()
+    try:
+        db = client[mongo_db]
+        coll = db[mongo_coll]
+        coll.insert_many(records)
+    finally:
+        client.close()
 
 
 def main() -> None:
     spark = build_spark()
     kafka_df = read_kafka_stream(spark)
-    aggregated_df = aggregate_metrics(kafka_df)
 
-    checkpoint_location = get_env("SPARK_CHECKPOINT_DIR", "/checkpoints/energy-metrics")
-
-    print("[streaming_job] Starting streaming query with foreachBatch -> MongoDB")
+    checkpoint_location = get_env("SPARK_CHECKPOINT_DIR", "/tmp/checkpoints/energy-metrics-raw")
+    print(f"[streaming_job] Using checkpointLocation={checkpoint_location}")
 
     query = (
-        aggregated_df.writeStream
-        .foreachBatch(write_batch_to_mongo)
-        .outputMode("update")
+        kafka_df.writeStream
+        .foreachBatch(write_raw_to_mongo)
+        .outputMode("append")
         .option("checkpointLocation", checkpoint_location)
         .start()
     )

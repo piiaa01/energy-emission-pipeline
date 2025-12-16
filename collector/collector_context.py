@@ -1,7 +1,7 @@
 import json
 import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 import psutil
 from confluent_kafka import Producer
@@ -15,8 +15,8 @@ class MetricsCollector:
     Collects energy/emission metrics during training and sends them to Kafka
     AND writes them to a local JSONL file.
 
-    - Per step: record → Kafka topic `training.metrics`
-    - On exit: run summary → `training.run_summary`
+    - Periodically: record -> Kafka topic `training.metrics`
+    - On exit: run summary -> Kafka topic `training.run_summary`
     """
 
     def __init__(
@@ -45,17 +45,20 @@ class MetricsCollector:
 
         self._file = None
 
-        # cumulative metrics
+        # Cumulative metrics
         self.cum_energy_kwh = 0.0
         self.cum_emissions_kg = 0.0
         self._last_ts = None
         self._last_send_ts = 0.0
-
         self._total_steps = 0
 
         cfg = Config()
         self.metrics_topic = cfg.get("kafka", "topic_training_metrics")
-        self.summary_topic = "training.run_summary"
+        self.summary_topic = cfg.get(
+            "kafka",
+            "topic_training_run_summary",
+            default="training.run_summary",
+        )
         self.bootstrap_servers = cfg.get("kafka", "bootstrap_servers")
 
         self.producer = Producer({"bootstrap.servers": self.bootstrap_servers})
@@ -63,6 +66,16 @@ class MetricsCollector:
             f"[MetricsCollector] Kafka producer to {self.bootstrap_servers} "
             f"(metrics_topic={self.metrics_topic}, summary_topic={self.summary_topic})"
         )
+
+    def _delivery_report(self, err, msg) -> None:
+        """Kafka delivery callback for debugging message delivery."""
+        if err is not None:
+            print(f"[MetricsCollector] ❌ Kafka delivery failed: {err}")
+        else:
+            print(
+                f"[MetricsCollector] ✅ Kafka delivered "
+                f"topic={msg.topic()} partition={msg.partition()}"
+            )
 
     def __enter__(self) -> "MetricsCollector":
         self._file = open(self.output_file, "a", encoding="utf-8")
@@ -79,7 +92,7 @@ class MetricsCollector:
             "user_id": self.user_id,
             "model_name": self.model_name,
             "dataset_name": self.dataset_name,
-            "region": self.region,
+            "region_iso": self.region,
             "framework": self.framework,
             "environment": self.environment,
             "total_energy_kwh": self.cum_energy_kwh,
@@ -107,13 +120,11 @@ class MetricsCollector:
 
     def update_training_state(self, epoch: int, step: int, loss: float, accuracy: float) -> None:
         now = time.time()
-        if self._last_ts is None:
-            dt = 0.0
-        else:
-            dt = now - self._last_ts
+        dt = 0.0 if self._last_ts is None else now - self._last_ts
         self._last_ts = now
 
-        interval_energy_kwh, interval_emissions_kg = self._estimate_interval(dt)
+        interval_energy_kwh, interval_emissions_kg, cpu_util_pct = self._estimate_interval(dt)
+
         self.cum_energy_kwh += interval_energy_kwh
         self.cum_emissions_kg += interval_emissions_kg
         self._total_steps += 1
@@ -124,13 +135,14 @@ class MetricsCollector:
             "user_id": self.user_id,
             "model_name": self.model_name,
             "dataset_name": self.dataset_name,
-            "region": self.region,
+            "region_iso": self.region,
             "framework": self.framework,
             "environment": self.environment,
             "epoch": epoch,
             "step": step,
             "loss": float(loss),
             "accuracy": float(accuracy),
+            "cpu_utilization_pct": float(cpu_util_pct),
             "energy_kwh": interval_energy_kwh,
             "emissions_kg": interval_emissions_kg,
             "cumulative_energy_kwh": self.cum_energy_kwh,
@@ -143,26 +155,38 @@ class MetricsCollector:
             self._send_kafka(record, topic=self.metrics_topic)
             self._last_send_ts = now
 
-    def _estimate_interval(self, dt_s: float) -> tuple[float, float]:
+    def _estimate_interval(self, dt_s: float) -> Tuple[float, float, float]:
+        """Estimate energy and emissions for the last time interval."""
         if dt_s <= 0:
-            return 0.0, 0.0
-        cpu_util = psutil.cpu_percent(interval=None) / 100.0
+            return 0.0, 0.0, 0.0
+
+        cpu_util_pct = psutil.cpu_percent(interval=None)  # 0..100
+        cpu_util = cpu_util_pct / 100.0
+
+        # Very rough proxy: CPU TDP * utilization
         tdp_w = 65.0
         power_w = tdp_w * cpu_util
+
         energy_kwh = power_w * dt_s / 3600.0 / 1000.0
         emissions_kg = energy_kwh * EMISSION_FACTOR_KG_PER_KWH
-        return energy_kwh, emissions_kg
+        return energy_kwh, emissions_kg, cpu_util_pct
 
     def _write_local(self, record: Dict[str, Any]) -> None:
+        """Write a JSONL record to the local output file."""
         if self._file is None:
             return
         self._file.write(json.dumps(record) + "\n")
         self._file.flush()
 
     def _send_kafka(self, record: Dict[str, Any], topic: str) -> None:
+        """Send a JSON record to Kafka."""
         try:
             payload = json.dumps(record).encode("utf-8")
-            self.producer.produce(topic=topic, value=payload)
+            self.producer.produce(
+                topic=topic,
+                value=payload,
+                on_delivery=self._delivery_report,
+            )
             self.producer.poll(0)
         except Exception as e:
             print(f"[MetricsCollector] Failed to send to Kafka topic={topic}: {e}")
