@@ -3,6 +3,7 @@ import sys
 import time
 import math
 import random
+import argparse
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -12,7 +13,7 @@ from collector.collector_context import MetricsCollector
 from kafka.config_loader import Config
 
 
-def train_with_metrics():
+def train_with_metrics(run_id: str | None = None):
     config = Config()
     training_cfg = config.training()
     project_env = config.get("project", "environment", default="local")
@@ -24,13 +25,18 @@ def train_with_metrics():
     dataset_name = training_cfg.get("dataset_name", "dummy_dataset")
 
     paths_cfg = config.paths()
-    output_file = paths_cfg.get("output_file", "./data/output.jsonl")
+    base_output_file = paths_cfg.get("output_file", "./data/output.jsonl")
 
     user_id = "pia"
     region = "DE"
     framework = "sklearn"
 
-    run_id = f"run_{int(time.time())}"
+
+    if not run_id:
+        run_id = f"run_{int(time.time())}"
+
+    base_dir = os.path.dirname(base_output_file) or "."
+    output_file = os.path.join(base_dir, f"{run_id}.jsonl")
 
     print(
         f"Starting training run_id={run_id}, model={model_type}, "
@@ -43,7 +49,7 @@ def train_with_metrics():
         user_id=user_id,
         model_name=model_type,
         region=region,
-        interval_s=2.0,
+        interval_s=1.0,  
         dataset_name=dataset_name,
         framework=framework,
         hyperparameters=training_cfg,
@@ -57,33 +63,25 @@ def train_with_metrics():
             for step in range(1, steps_per_epoch + 1):
                 global_step += 1
                 progress = global_step / float(epochs * steps_per_epoch)
-                loss = max(
-                    0.1,
-                    2.0 * math.exp(-3 * progress) + random.uniform(-0.05, 0.05),
-                )
-                accuracy = min(
-                    0.99,
-                    0.5 + 0.5 * progress + random.uniform(-0.02, 0.02),
-                )
+                loss = max(0.1, 2.0 * math.exp(-3 * progress) + random.uniform(-0.05, 0.05))
+                accuracy = min(0.99, 0.5 + 0.5 * progress + random.uniform(-0.02, 0.02))
 
-                collector.update_training_state(
-                    epoch=epoch,
-                    step=step,
-                    loss=loss,
-                    accuracy=accuracy,
-                )
+               
+                if step % 5 == 0:
+                    collector.update_training_state(epoch=epoch, step=step, loss=loss, accuracy=accuracy)
 
                 time.sleep(0.05)
 
                 if step % 20 == 0:
-                    print(
-                        f"  Step {step}/{steps_per_epoch} "
-                        f"- loss={loss:.4f}, acc={accuracy:.4f}"
-                    )
+                    print(f"  Step {step}/{steps_per_epoch} - loss={loss:.4f}, acc={accuracy:.4f}")
 
     print("Training completed. Metrics and run summary sent to Kafka.")
     print(f"Output file (local JSONL) path: {output_file}")
 
 
 if __name__ == "__main__":
-    train_with_metrics()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run_id", default=None)
+    args = parser.parse_args()
+
+    train_with_metrics(run_id=args.run_id)

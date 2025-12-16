@@ -1,20 +1,25 @@
 FROM bitnamilegacy/spark:3.5.0
 
 USER root
-
 WORKDIR /app
 
-# Python deps (PySpark ist im Image schon drin, aber pymongo brauchen wir)
-COPY docker/requirements-spark.txt ./requirements-spark.txt
-RUN pip install --no-cache-dir -r requirements-spark.txt
+# Install Python + venv tooling
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 python3-venv python3-pip ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-# Streaming job
-COPY spark/streaming_job.py ./streaming_job.py
+# Create an isolated virtual environment for PySpark dependencies
+ENV VENV_PATH=/opt/venv
+RUN python3 -m venv ${VENV_PATH}
+
+# Install Python deps into the venv
+COPY docker/requirements-spark.txt /app/requirements-spark.txt
+RUN ${VENV_PATH}/bin/pip install --no-cache-dir -r /app/requirements-spark.txt
+
+# Hard check during build
+RUN ${VENV_PATH}/bin/python -c "import pymongo; print('pymongo OK:', pymongo.__version__)"
+
+# Copy streaming job
+COPY spark/streaming_job.py /app/streaming_job.py
 
 ENV PYTHONUNBUFFERED=1
-
-# Run Spark with Kafka integration (download connector via --packages)
-CMD ["/opt/bitnami/spark/bin/spark-submit", \
-     "--master", "local[*]", \
-     "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0", \
-     "/app/streaming_job.py"]
