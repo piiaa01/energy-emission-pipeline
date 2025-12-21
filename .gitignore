@@ -33,3 +33,5 @@ Thumbs.db
 *.json
 *.jsonl
 data/output.jsonl
+
+commands_demo.txt
