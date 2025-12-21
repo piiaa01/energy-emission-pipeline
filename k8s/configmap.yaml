@@ -5,10 +5,16 @@ metadata:
   namespace: bigdata-pipeline
 data:
   KAFKA_BOOTSTRAP_SERVERS: "kafka-svc:9092"
+
+  KAFKA_TOPIC: "training.events"
+
   KAFKA_METRICS_TOPIC: "training.metrics"
 
   MONGODB_URI: "mongodb://mongodb:27017"
-  MONGODB_DB: "energy_metrics"
+  MONGODB_DB: "energy_emissions"
+  MONGODB_METRICS_COLLECTION: "training_metrics"
+
+  MONGODB_RUN_SUMMARY_COLLECTION: "training_run_summary"
   MONGODB_AGG_COLLECTION: "aggregated_metrics"
 
-  SPARK_CHECKPOINT_DIR: "/checkpoints/energy-metrics"
+  SPARK_CHECKPOINT_DIR: "/tmp/checkpoints/energy-events"

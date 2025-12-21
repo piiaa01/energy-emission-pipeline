@@ -4,11 +4,12 @@ metadata:
   name: zookeeper
   namespace: bigdata-pipeline
 spec:
-  ports:
-    - port: 2181
-      name: client
   selector:
     app: zookeeper
+  ports:
+    - name: client
+      port: 2181
+      targetPort: 2181
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -27,9 +28,12 @@ spec:
     spec:
       containers:
         - name: zookeeper
-          image: zookeeper:3.9
-          env:
-            - name: ALLOW_ANONYMOUS_LOGIN
-              value: "yes"
+          image: confluentinc/cp-zookeeper:7.6.1
           ports:
             - containerPort: 2181
+              name: client
+          env:
+            - name: ZOOKEEPER_CLIENT_PORT
+              value: "2181"
+            - name: ZOOKEEPER_TICK_TIME
+              value: "2000"
