@@ -147,19 +147,7 @@ The pipeline uses a single Kafka topic named training.events.
 
 Create the topic (idempotent, safe to run multiple times):
 
-kubectl run -n $NS kafka-client --restart=Never --rm -it \
-  --image=confluentinc/cp-kafka:7.6.1 -- \
-  bash -lc "kafka-topics --bootstrap-server kafka-svc:9092 \
-    --create --if-not-exists \
-    --topic training.events \
-    --partitions 1 \
-    --replication-factor 1"
-
-Verify that the topic exists:
-
-kubectl run -n $NS kafka-client --restart=Never --rm -it \
-  --image=confluentinc/cp-kafka:7.6.1 -- \
-  bash -lc "kafka-topics --bootstrap-server kafka-svc:9092 --list"
+kubectl run -n $NS kafka-client --restart=Never --rm -it --image=confluentinc/cp-kafka:7.6.1 --command -- kafka-topics --bootstrap-server kafka-svc:9092 --list
 
 ---
 
